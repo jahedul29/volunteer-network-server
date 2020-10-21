@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
+const fileUpload = require("express-fileupload");
+
 require("dotenv").config();
 
 const MongoClient = require("mongodb").MongoClient;
@@ -16,21 +18,20 @@ const port = process.env.PORT || 5000;
 const app = express();
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({}));
 // for parsing application/xwww-
 app.use(bodyParser.urlencoded({ extended: true }));
+// app.use("/profile", express.static("upload/images"));
+app.use(fileUpload());
 
 app.get("/", (req, res) => {
   res.send("Hello World!");
 });
 
+// Establishing database connection
 client.connect((err) => {
+  // Event collection processes
   const eventCollection = client.db(process.env.DB_NAME).collection("events");
-  const regInfoCollection = client
-    .db(process.env.DB_NAME)
-    .collection("regInfo");
-  // perform actions on the collection object
-  console.log("Database connection established");
 
   app.get("/getAllEvents", (req, res) => {
     eventCollection.find({}).toArray((err, docs) => {
@@ -44,12 +45,62 @@ client.connect((err) => {
     });
   });
 
+  app.post("/addEvent", (req, res) => {
+    const event = req.body;
+    const file = req.files.image;
+    const newImg = file.data;
+    const encImg = newImg.toString("base64");
+
+    const image = {
+      contentType: file.mimetype,
+      size: file.size,
+      img: Buffer.from(encImg, "base64"),
+    };
+
+    const newEvent = { ...event, image };
+
+    eventCollection.insertOne(newEvent).then((result) => {
+      if (result.insertedCount > 0) {
+        res.status(200).send(result.insertedCount > 0);
+      } else {
+        res.sendStatus(404);
+      }
+    });
+  });
+
+  app.delete("/deleteEvent/:id", (req, res) => {
+    const id = req.params.id;
+    eventCollection.deleteOne({ _id: ObjectId(id) }).then((result) => {
+      if (result.deletedCount > 0) {
+        res.status(200).send(result.deletedCount > 0);
+      } else {
+        res.sendStatus(404);
+      }
+    });
+  });
+
+  // Registered volunteering processes
+  const regInfoCollection = client
+    .db(process.env.DB_NAME)
+    .collection("regInfo");
+  console.log("Database connection established");
+
   app.post("/addRegInfo", (req, res) => {
     const regData = req.body;
-    regInfoCollection.insertOne(regData).then((result) => {
-      console.log(result);
-      res.sendStatus(200);
-    });
+
+    eventCollection
+      .find({ _id: ObjectId(regData.volunteeringId) })
+      .toArray((err, events) => {
+        regInfoCollection
+          .insertOne({ ...regData, image: events[0].image })
+          .then((result) => {
+            if (result.insertedCount) {
+              res.status(200).send(result.insertedCount > 0);
+            } else {
+              res.sendStatus(404);
+            }
+          });
+      });
   });
 
   app.get("/getRegEventByEmail/:email", (req, res) => {
@@ -60,19 +111,24 @@ client.connect((err) => {
 
   app.delete("/deleteReg/:id", (req, res) => {
     const id = req.params.id;
-    regInfoCollection
-      .deleteOne({ _id: ObjectId(id) })
-      .then((result) => res.sendStatus(200));
+    regInfoCollection.deleteOne({ _id: ObjectId(id) }).then((result) => {
+      if (result.deletedCount > 0) {
+        res.status(200).send(result.deletedCount > 0);
+      } else {
+        res.sendStatus(404);
+      }
+    });
   });
 
   app.get("/getAllRegEvent", (req, res) => {
-    regInfoCollection.find({}).toArray((err, docs) => {
-      res.send(docs);
-    });
+    regInfoCollection
+      .find({})
+      .project({ image: 0 })
+      .toArray((err, docs) => {
+        res.send(docs);
+      });
   });
 });
-
-console.log(process.env.DB_NAME);
 
 app.listen(port, () => {
   console.log(`Example app listening at http://localhost:${port}`);
